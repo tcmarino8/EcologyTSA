@@ -1,0 +1,767 @@
+---
+title: "ESPM 174A - Lab 7 & Homework Assignment 4"
+author: "Tyler Marino"
+date: "10/27/2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+### Instructions
+In this lab and associated homework assignment, we will advance the final project. We will get the data ready, we will specify a model to fit your own data, we will fit the model, and we will interpret the results. This lab is meant to build on Homework Assignment 2 (HW2), and get you closer to the final model or set of models that you will be using for your project. 
+
+Most of you will be fitting MAR or MARSS models. If so, answer questions 1-5 below. If in our grading of HW2 we recommended that you use some method other than MAR on MARSS (e.g., ARIMA), please see question 6 first.
+
+Please submit the completed lab on bCourses as a knitted R Markdown (html or pdf) by Friday, Oct 20th before midnight. This submission will be the 4th and last Homework Assignment (HW4).
+
+### Questions
+Question 1
+In your individual project, what is (are) your variate(s), also known as response(s)? Create the object (or recover it from HW2), and name it 'dat'. If you have many variates, you do not need to analyze the whole dataset in this lab/HW4. However, the closer the resemblance of this data set to the one you will end up analyzing, the better. E.g., if your question is at the community level, then include several species; if you would like to compare a particular physical variable across different sites, then include several sites. If you have multivariate responses, name rows appropriately so that you can keep track of each state. Do you need to further clean and/or transform these data for analysis (e.g., log-transform, z-score)? If so, do it below (and name this new object 'transformed_dat'). Remember time needs to go over columns (use tidyr's 'pivot_wider' if necessary), and you need a 'matrix' object--you can check that using the function 'class()'  [1 point]
+```{r code chunk 1}
+                                   #Begin data analysis#
+library(dplyr)
+library(tidyverse)
+library(patchwork) 
+library(tinytex)
+library(MARSS)
+
+CV <- function(x, ...){(sd(x, ...)/mean(x, ...))*100} # specify a function for CV
+
+
+z_score <- function(data){data-mean(data)/sd(data)}
+get_differnce <- function(df, column){
+  shifted_column <- c(0, column)
+  col_diff <- column - shifted_column
+  #col_diff <- as.integer(unlist(col_diff))
+  are0 <- which(col_diff == 0, arr.ind = TRUE)
+  constant_vals <- list()
+  for (i in as.vector(are0)) {
+    constant_vals <- c(constant_vals, column[i])
+  }
+  return (col_diff)
+}
+#Soil Moisture Data
+#Load the Data
+Soil_moisture <- read.csv("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\ESPM 174A\\Project\\soil_moisture_open.csv")
+
+#SELECTING VALUABLE COLUMNS FROM THE DATA!
+#Soil_moisture <- Soil_moisture %>% select('Year', 'Month', 'open10_VWC', 'open60_VWC')
+
+
+#Grouping data by month and year and collecting the mean value for each month
+#Soil_moisture <- Soil_moisture %>% 
+  #group_by(Month, Year) %>%
+  #summarize(open10_VWC_mean=mean(open10_VWC), open10_VWC_CV=CV(open10_VWC), open60_VWC_mean=mean(open60_VWC), open60_VWC_CV = CV(open60_VWC))
+
+#Adding a day value(1) so we can create a date
+#soil_len = 46
+#soil_day <- numeric(length = 46)
+#for (i in seq_along(soil_day)) {
+  #soil_day[i] <- 1
+#}
+#Soil_moisture$Day <- soil_day
+#Create date objects
+Soil_moisture$Date <- lubridate::as_date(paste(Soil_moisture$Year, Soil_moisture$Month, Soil_moisture$Day))
+
+
+#Try to get rid of month and year, and order the data and remove extra data from snow_depth
+Soil_moisture <- Soil_moisture[order(Soil_moisture$Date),]
+
+Soil_moisture_wdate <- Soil_moisture %>% dplyr::select('open10_VWC', 'open60_VWC', 'Date')
+
+Soil_moisture <- Soil_moisture %>% column_to_rownames(., var = 'Date')
+Soil_moisture <- Soil_moisture %>% dplyr::select('open10_VWC', 'open60_VWC')
+#Turn data into a matrix in the propper order 
+soil_moisture_ts_matrix <- t(as.matrix(Soil_moisture))
+
+
+
+#Repeat for snow data
+
+snow_depth <- read.csv(("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\ESPM 174A\\Project\\snow_depth_data.csv"))
+
+#snow_depth <- snow_depth %>% select('Year', 'Month','Air.Temp.Max..C.', 'Air.Temp.Min..C.', 'Season.Total.Precip..mm.', 'New.Snow..cm.', 'Season.Total.Snow..cm.', 'Snowpack.depth..cm.') 
+
+#snow_depth <- snow_depth %>% 
+  #group_by(Month, Year) %>%
+  #summarize(max_air_mean=mean(Air.Temp.Max..C.), min_air_mean=mean(Air.Temp.Min..C.), precip_mean=mean(Season.Total.Precip..mm.), total_snow_mean = mean(Season.Total.Snow..cm.), snowpack_mean = mean(Snowpack.depth..cm., na.rm=T))
+
+#snow_dep_len = 142
+#snow_depth_day <- numeric(length = 142)
+#for (i in seq_along(snow_depth_day)) {
+  #snow_depth_day[i] <- 1
+#}
+#snow_depth$Day <- snow_depth_day
+snow_depth$Date <- lubridate::as_date(paste(snow_depth$Year, snow_depth$Month, snow_depth$Day))
+
+
+snow_depth <- snow_depth[ order(snow_depth$Date),]
+
+snow_depth_wdate <- snow_depth %>% dplyr::select('Snowpack.depth..cm.', 'Air.Temp.Max..C.', 'Date')
+
+snow_depth <- snow_depth %>% tibble::column_to_rownames(., var = 'Date')
+?column_to_rownames
+snow_depth <- snow_depth %>% dplyr::select('Snowpack.depth..cm.', 'Air.Temp.Max..C.')
+
+snow_depth_wdate <- head(snow_depth_wdate, 1384)
+snow_depth_wdate <- snow_depth_wdate[-1,]
+snow_depth <- head(snow_depth,1384)
+snow_depth <- snow_depth[-1,]
+#snow_depth <- head(snow_depth, 46)
+snow_ts_matrix <- t(as.matrix(snow_depth))
+
+plot_snowpack <- ggplot(snow_depth_wdate, aes(Date, Snowpack.depth..cm.))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Snowpack Accumulation')
+plot_snowpack
+
+plot_max_temp <- ggplot(snow_depth_wdate, aes(Date, Air.Temp.Max..C.))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Max Temp per Day')
+plot_max_temp
+
+plot_snowpack + plot_max_temp + plot_layout(nrow=1, ncol=2)
+
+
+plot_sm10 <- ggplot(Soil_moisture_wdate, aes(Date, open10_VWC))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Soil Moisture: depth 10')
+plot_sm10
+
+plot_sm60 <- ggplot(Soil_moisture_wdate, aes(Date, open60_VWC))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Soil Moisture: depth 60')
+plot_sm60
+
+#This is all the data plotted. It shows good trends, seasonal of course as we are looking at snowfall and temp and soil moisture which comes directly from wetness which tends to be when snow/rain is falling/melting.
+params_plot <- plot_sm10 + plot_sm60 + plot_snowpack + plot_max_temp + plot_layout(nrow=2, ncol=2)
+params_plot
+
+#plot_density_10 <- ggplot(Soil_moisture_wdate) +
+  #geom_density(aes(x=open60_VWC, date), alpha=0.5) + # alpha makes colors transparent
+  #xlab('count') +
+  #theme_bw()+
+```
+```{r}
+
+
+
+                        #Look at the differences for different depths(10, 60, snow pack). #
+                            #Look for outliers(where are the big jumps).#
+difference10 <- get_differnce(Soil_moisture_wdate, column = Soil_moisture_wdate$open10_VWC)
+Soil_moisture_wdate$daily_change10 <- difference10[2:1384]
+plot_differences10 <- ggplot(Soil_moisture_wdate, aes(Date, daily_change10))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('difference in SM 10')
+plot_differences10
+class(difference10)
+
+difference60 <- get_differnce(Soil_moisture_wdate, column = Soil_moisture_wdate$open60_VWC)
+Soil_moisture_wdate$daily_change60 <- difference60[2:1384]
+plot_differences60 <- ggplot(Soil_moisture_wdate, aes(Date, daily_change60))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('difference in SM 60')
+plot_differences60
+class(difference60)
+
+differences_plot <- plot_differences10 + plot_differences60 + plot_layout(nrow=2, ncol = 1)
+differences_plot
+
+differenceSP <- get_differnce(snow_depth_wdate, column = snow_depth_wdate$Snowpack.depth..cm.)
+snow_depth_wdate$daily_changeSP <- differenceSP[2:1384]
+plot_differencesSP <- ggplot(snow_depth_wdate, aes(Date, daily_changeSP))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('difference in SnowPack depth')
+plot_differencesSP
+class(differenceSP)
+
+differenceAIR <- get_differnce(snow_depth_wdate, column = snow_depth_wdate$Air.Temp.Max..C.)
+snow_depth_wdate$daily_changeAIR <- differenceAIR[2:1384]
+plot_differencesAIR <- ggplot(snow_depth_wdate, aes(Date, daily_changeAIR))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('difference in AirTemp')
+plot_differencesAIR
+class(differenceAIR)
+
+#This tells us more how larger changes in each variable line up with the differences of other variables. Note, 2011 has weirder distributions than others.
+differences_plot <- plot_differences10 + plot_differences60 + plot_differencesSP + plot_differencesAIR+ plot_layout(nrow=4, ncol = 1)
+differences_plot
+
+
+```
+
+
+
+Your text here (<100 words).
+The data we are looking at is the soil moisture content in the Sierra Nevada Mountains. This is collected at several depths which we believe could be used as the sites. We will use one measurement method/location which is an open landscape, no tree coverage. This way we get the most relationship between snow pack and soil moisture. I went ahead and exported and cleaned the data in python and then brought it over into R where I could run the statistical models.
+
+Notice: one period of large snowpack accumulation... lets remove the periodicity and try to see more trends...
+
+
+Question 2
+What is (are) your covariate(s), aka driver(s), if any? Z-score them and make sure they have no missing data (MARSS does not allow NA's in covariate data). You can name them 'trasnformed_covar'. Remember time needs to go over columns (use tidyr's 'pivot_wider' if necessary), and you need a 'matrix' object--you can check that using the function 'class()' [1 point]
+```{r code chunk 2}
+
+
+
+
+#Zscore all the data. I think this will be better so we will be       
+                            #comparing apples to apples and not apples to dinousaurs.
+snow_depth_wdate$z_snowdepth <- (snow_depth_wdate$Snowpack.depth..cm.-mean(snow_depth_wdate$Snowpack.depth..cm.))/sd(snow_depth_wdate$Snowpack.depth..cm.)
+
+snow_depth_wdate$z_airtemp <- (snow_depth_wdate$Air.Temp.Max..C.-mean(snow_depth_wdate$Air.Temp.Max..C.))/sd(snow_depth_wdate$Air.Temp.Max..C.)
+snow_depth_wdate$z_airtemp <- (snow_depth_wdate$Air.Temp.Max..C.-mean(snow_depth_wdate$Air.Temp.Max..C.))/sd(snow_depth_wdate$Air.Temp.Max..C.)
+
+Soil_moisture_wdate$z_10 <- (Soil_moisture_wdate$open10_VWC - mean(Soil_moisture_wdate$open10_VWC))/sd(Soil_moisture_wdate$open10_VWC)
+Soil_moisture_wdate$z_60 <- (Soil_moisture_wdate$open60_VWC - mean(Soil_moisture_wdate$open60_VWC))/sd(Soil_moisture_wdate$open60_VWC)
+
+snow_ts_matrix_z <- t(as.matrix(snow_depth_wdate %>% dplyr::select(z_airtemp, z_snowdepth)))
+soil_ts_matz <- t(as.matrix(Soil_moisture_wdate %>% dplyr::select(z_10, z_60)))
+dim(snow_ts_matrix)
+
+
+
+
+differenceAIRz <- get_differnce(snow_depth_wdate, column = snow_depth_wdate$z_airtemp)
+snow_depth_wdate$daily_changeAIRz <- differenceAIRz[2:1384]
+plot_differencesAIRz <- ggplot(snow_depth_wdate, aes(Date, daily_changeAIRz))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('difference in AirTempzd depth')
+plot_differencesAIRz
+
+
+
+
+## Plot the Z scored data. will have similar display but note y axis range...
+plot_snowpackz <- ggplot(snow_depth_wdate, aes(Date, z_snowdepth))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Snowpack Accumulation')
+plot_snowpackz
+
+plot_max_tempz <- ggplot(snow_depth_wdate, aes(Date, z_airtemp))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Max Temp per Day')
+plot_max_tempz
+
+#plot_snowpack + plot_max_temp + plot_layout(nrow=1, ncol=2)
+
+
+plot_sm10z <- ggplot(Soil_moisture_wdate, aes(Date, z_10))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 10')
+plot_sm10z
+
+plot_sm60z <- ggplot(Soil_moisture_wdate, aes(Date, z_60))+
+  geom_point()+
+  geom_smooth()+
+  #geom_boxplot(fill=NA)+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 60')
+plot_sm60z
+
+params_plotz <- plot_sm10z + plot_sm60z + plot_snowpackz + plot_max_tempz + plot_layout(nrow=2, ncol=2)
+params_plotz
+
+#Notice that The year 2011 has a later valley for most of the depths and even the max temp does not follow the same pattern as the previous.
+```
+
+
+```{r code chunk 2}
+#I will be breaking apart the data into the sections of data I wish to look at. The peak and fall of soil moisture. To do so I will hardcode different timestep intervals to find these points using graphical representation, new Df's and other methods to reorganize my data.
+
+
+
+#Find the center of first peak to a valley. Take a slice of 200 days from peak to valley of soilmoisture depth. This will be the baseline for all the data slicing we do.
+#dataframe work:
+season1SM <- Soil_moisture_wdate %>% slice(40:260)
+season2SM <- Soil_moisture_wdate %>% slice(380:600)
+season3SM <- Soil_moisture_wdate %>% slice(745:965)
+season4SM <- Soil_moisture_wdate %>% slice(1130:1350)
+
+season1SP <- snow_depth_wdate %>% slice(40:260)
+season2SP <- snow_depth_wdate %>% slice(380:600)
+season3SP <- snow_depth_wdate %>% slice(745:965)
+season4SP <- snow_depth_wdate %>% slice(1130:1350)
+
+#Plotting:
+
+
+       #####-------------------Plot depth 10 SM Seasonal-------------------------#####
+season1_plot_10z <- ggplot(season1SM, aes(Date, z_10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 10(Season 1)')
+season2_plot_10z <- ggplot(season2SM, aes(Date, z_10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 10(Season 2)')
+season3_plot_10z <- ggplot(season3SM, aes(Date, z_10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 10(Season 3)')
+season4_plot_10z <- ggplot(season4SM, aes(Date, z_10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 10(Season 4)')
+
+seasonalPlotsof10zd <- season1_plot_10z + season2_plot_10z + season3_plot_10z + season4_plot_10z + plot_layout(nrow=2, ncol=2)
+seasonalPlotsof10zd
+
+           #####-------------------Plot depth 60 SM Seasonal-------------------------#####
+season1_plot_60z <- ggplot(season1SM, aes(Date, z_60))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 60(Season 1)')
+season2_plot_60z <- ggplot(season2SM, aes(Date, z_60))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 60(Season 2)')
+season3_plot_60z <- ggplot(season3SM, aes(Date, z_60))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 60(Season 3)')
+season4_plot_60z <- ggplot(season4SM, aes(Date, z_60))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd Soil Moisture: depth 60(Season 4)')
+
+seasonalPlotsof60zd <- season1_plot_60z + season2_plot_60z + season3_plot_60z + season4_plot_60z + plot_layout(nrow=2, ncol=2)
+seasonalPlotsof60zd
+
+
+
+            #####-------------------Plot Snowpack Seasonal-------------------------#####
+
+season1_plot_SPz <- ggplot(season1SP, aes(Date, z_snowdepth))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd SnowDepth(Season 1)')
+season2_plot_SPz <- ggplot(season2SP, aes(Date, z_snowdepth))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd SnowDepth(Season 2)')
+season3_plot_SPz <- ggplot(season3SP, aes(Date, z_snowdepth))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd SnowDepth(Season 3)')
+season4_plot_SPz <- ggplot(season4SP, aes(Date, z_snowdepth))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd SnowDepth(Season 4)')
+
+seasonalPlotsSDz <- season1_plot_SPz + season2_plot_SPz + season3_plot_SPz + season4_plot_SPz + plot_layout(nrow=2, ncol=2)
+seasonalPlotsSDz
+
+
+            #####-------------------Plot AirTemp Seasonal-------------------------#####
+season1_plot_ATz <- ggplot(season1SP, aes(Date, z_airtemp))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd airtemp(Season 1)')
+season2_plot_ATz <- ggplot(season2SP, aes(Date, z_airtemp))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd airtemp(Season 2)')
+season3_plot_ATz <- ggplot(season3SP, aes(Date, z_airtemp))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd airtemp(Season 3)')
+season4_plot_ATz <- ggplot(season4SP, aes(Date, z_airtemp))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('Zd airtemp(Season 4)')
+
+seasonalPlotsATz <- season1_plot_ATz + season2_plot_ATz + season3_plot_ATz + season4_plot_ATz + plot_layout(nrow=2, ncol=2)
+seasonalPlotsATz
+
+##    Due to differences in the graphical representation of the data, we want to see what happens with marss models when run on year 2011 vs other years.
+
+corr1.1 <- cor(season1SM$open10_VWC, season1SM$open10_VWC)
+corr1.2 <- cor(season1SM$open10_VWC, season2SM$open10_VWC)
+corr1.3 <- cor(season1SM$open10_VWC, season3SM$open10_VWC)
+corr1.4 <- cor(season1SM$open10_VWC, season4SM$open10_VWC)
+corr2.2 <- cor(season2SM$open10_VWC, season2SM$open10_VWC)
+corr2.3 <- cor(season3SM$open10_VWC, season2SM$open10_VWC)
+corr2.4 <- cor(season4SM$open10_VWC, season2SM$open10_VWC)
+corr3.3 <- cor(season3SM$open10_VWC, season3SM$open10_VWC)
+corr3.4 <- cor(season3SM$open10_VWC, season4SM$open10_VWC)
+corr4.4 <- cor(season4SM$open10_VWC, season4SM$open10_VWC)
+
+sM10Corr_seasonal <- matrix(c(corr1.1, corr1.2, corr1.3, corr1.4,
+                             corr1.2, corr2.2, corr2.3, corr2.4,
+                             corr1.3, corr2.3, corr3.3, corr3.4,
+                             corr1.4, corr2.4, corr3.4, corr4.4), nrow = 4, ncol= 4)
+
+SMforsummarySeason1 <- season1SM[,c('open10_VWC', 'open60_VWC', 'Date')]
+SMforsummarySeason2 <- season2SM[,c('open10_VWC', 'open60_VWC', 'Date')]
+SMforsummarySeason3 <- season3SM[,c('open10_VWC', 'open60_VWC', 'Date')]
+SMforsummarySeason4 <- season4SM[,c('open10_VWC', 'open60_VWC', 'Date')]
+summary(SMforsummarySeason1)
+summary(SMforsummarySeason2)
+summary(SMforsummarySeason3)
+summary(SMforsummarySeason4)
+
+SPforsummarySeason1 <- season1SP[,c('Snowpack.depth..cm.', 'Air.Temp.Max..C.', 'Date')]
+SPforsummarySeason2 <- season2SP[,c('Snowpack.depth..cm.', 'Air.Temp.Max..C.', 'Date')]
+SPforsummarySeason3 <- season3SP[,c('Snowpack.depth..cm.', 'Air.Temp.Max..C.', 'Date')]
+SPforsummarySeason4 <- season4SP[,c('Snowpack.depth..cm.', 'Air.Temp.Max..C.', 'Date')]
+summary(SPforsummarySeason1)
+summary(SPforsummarySeason2)
+summary(SPforsummarySeason3)
+summary(SPforsummarySeason4)
+
+
+
+```
+
+
+```{r code chunk 2}
+```{r}
+#Checking types of columns in dataframe. I wish for them all to be ints/numeric
+
+sapply(season1SP, class)
+#all are numeric yet i still get error in the code below because dplyr doesnt like double?? 
+
+
+#Need to setup for the marss models. Take seasonal data and turn it into matricies.
+S1.snow_ts_z <- t(as.matrix(season1SP %>% dplyr::select(z_airtemp, z_snowdepth)))
+S1.soil_ts_z <- t(as.matrix(season1SM %>% dplyr::select(z_10, z_60)))
+
+S2.snow_ts_z <- t(as.matrix(season2SP %>% dplyr::select(z_airtemp, z_snowdepth)))
+S2.soil_ts_z <- t(as.matrix(season2SM %>% dplyr::select(z_10, z_60)))
+
+S3.snow_ts_z <- t(as.matrix(season3SP %>% dplyr::select(z_airtemp, z_snowdepth)))
+S3.soil_ts_z <- t(as.matrix(season3SM %>% dplyr::select(z_10, z_60)))
+
+S4.snow_ts_z <- t(as.matrix(season4SP %>% dplyr::select(z_airtemp, z_snowdepth)))
+S4.soil_ts_z <- t(as.matrix(season4SM %>% dplyr::select(z_10, z_60)))
+
+
+#Now to craft the Models
+#----------Season 1-------------#
+S1.mod_mine = list() # This will be the list of parameters, each is a matrix
+S1.B = matrix(c(.8, .8, .05, .8), nrow=2) 
+S1.mod_mine$B = 'unconstrained'  # iteraction between the 10 and 60 but minimal between 60 and 10
+S1.mod_mine$Z = "identity"
+S1.mod_mine$U = "zero" # no drift
+S1.mod_mine$Q = "diagonal and equal" # single process error across species and replicates
+S1.mod_mine$C = "diagonal and equal"# each species may be affected by the covariate differently
+S1.mod_mine$c = S1.snow_ts_z # Covariate data, what we cooked earlier
+S1.mod_mine$R = "zero" # Single observation error across species and replicates
+S1.mod_mine$A = "zero"
+
+S1.mod_mine.fit =MARSS(S1.soil_ts_z, model=S1.mod_mine)
+MARSSparamCIs(S1.mod_mine.fit)
+season_1_params = as.vector(MARSSvectorizeparam(S1.mod_mine.fit))
+
+#----------Season 2------------#
+S2.mod_mine = list() # This will be the list of parameters, each is a matrix
+S2.B = matrix(c(.75, .7, .08, .65), nrow=2) 
+S2.mod_mine$B = 'unconstrained'# iteratcion between the 10 and 60 but minimal between 60 and 10
+S2.mod_mine$Z = "identity"
+S2.mod_mine$U = "zero" # no drift
+S2.mod_mine$Q = "diagonal and unequal" # single process error across species and replicates
+S2.mod_mine$C = "diagonal and unequal"# each species may be affected by the covariate differently
+S2.mod_mine$c = S2.snow_ts_z # Covariate data, what we cooked earlier
+S2.mod_mine$R = "zero" # Single observation error across species and replicates
+S2.mod_mine$A = "zero"
+
+S2.mod_mine.fit = MARSS(S2.soil_ts_z, model=S2.mod_mine)
+MARSSparamCIs(S2.mod_mine.fit)
+season_2_params = as.vector(MARSSvectorizeparam(S2.mod_mine.fit))
+
+#----------Season 3------------#
+S3.mod_mine = list() # This will be the list of parameters, each is a matrix
+S3.B = matrix(c(.7, .8, .1, .7), nrow=2) 
+S3.mod_mine$B = 'unconstrained'# iteratcion between the 10 and 60 but minimal between 60 and 10
+S3.mod_mine$Z = "identity"
+S3.mod_mine$U = "zero" # no drift
+S3.mod_mine$Q = "diagonal and equal" # single process error across species and replicates
+S3.mod_mine$C = "unconstrained"# each species may be affected by the covariate differently
+S3.mod_mine$c = S3.snow_ts_z # Covariate data, what we cooked earlier
+S3.mod_mine$R = "zero" # Single observation error across species and replicates
+S3.mod_mine$A = "zero"
+
+S3.mod_mine.fit = MARSS(S3.soil_ts_z, model=S3.mod_mine)
+MARSSparamCIs(S3.mod_mine.fit)
+season_3_params = as.vector(MARSSvectorizeparam(S3.mod_mine.fit))
+
+#----------Season 4------------#
+S4.mod_mine = list() # This will be the list of parameters, each is a matrix
+S4.B = matrix(c(.6, .5, .3, .5), nrow=2) 
+S4.mod_mine$B = 'unconstrained'# iteratcion between the 10 and 60 but minimal between 60 and 10
+S4.mod_mine$Z = "identity"
+S4.mod_mine$U = "zero" # no drift
+S4.mod_mine$Q = "diagonal and equal" # single process error across species and replicates
+S4.mod_mine$C = "diagonal and equal"# each species may be affected by the covariate differently
+S4.mod_mine$c = S4.snow_ts_z # Covariate data, what we cooked earlier
+S4.mod_mine$R = "zero" # Single observation error across species and replicates
+S4.mod_mine$A = "zero"
+
+S4.mod_mine.fit = MARSS(S4.soil_ts_z, model=S4.mod_mine)
+params_season4 = MARSSparamCIs(S4.mod_mine.fit)
+season_4_params = as.vector(MARSSvectorizeparam(S4.mod_mine.fit))
+
+?MARSSparamCIs
+```
+
+
+```{r}
+### In this code chunk I will do further analysis on the params of the models. I will take all the parameter and put them into a dataframe, one for each year
+
+season1_df <- tidy(S1.mod_mine.fit)
+season1_df$Season <- 1
+season2_df <- tidy(S2.mod_mine.fit)
+season2_df$Season <- 2
+season3_df <- tidy(S3.mod_mine.fit)
+season3_df$Season <- 3
+season4_df <- tidy(S4.mod_mine.fit)
+season4_df$Season <- 4
+
+all_season_df <- rbind(season1_df, season2_df, season3_df, season4_df)
+
+all_season_df_confined <- all_season_df[c(2,3, 5, 8, 9, 10, 11, 13, 14, 16, 19, 20, 21, 22, 24, 25, 27, 30, 31, 32, 33, 35, 36, 38, 41, 42, 43, 44),]
+all_season_df$logEstimate <- log(all_season_df$estimate + 1)
+all_season_df$logLower <- log(all_season_df$conf.low + 1)
+all_season_df$logUpper <- log(all_season_df$conf.up + 1)
+
+all_season_df$zEstimate <- z_score(all_season_df$estimate)
+all_season_df$zLower <- z_score(all_season_df$conf.low)
+all_season_df$zUpper <- z_score(all_season_df$conf.up)
+
+plot_cis_confined <- ggplot(all_season_df_confined, aes(x=Season, y=estimate, fill=term)) + 
+  geom_bar(stat="identity", color="black", position=position_dodge()) +
+  geom_errorbar(aes(ymin=conf.low, ymax=conf.up), width=.2,
+                 position=position_dodge(.9)) 
+
+ plot_cis <- ggplot(all_season_df, aes(x=Season, y=estimate, fill=term)) + 
+  geom_bar(stat="identity", color="black", position=position_dodge()) +
+  geom_errorbar(aes(ymin=conf.low, ymax=conf.up), width=.2,
+                 position=position_dodge(.9)) 
+
+ 
+ plot_logCIs <- ggplot(all_season_df, aes(x=Season, y=logEstimate, fill=term)) + 
+  geom_bar(stat="identity", color="black", position=position_dodge()) +
+  geom_errorbar(aes(ymin=logLower, ymax=logUpper), width=.2,
+                 position=position_dodge(.9)) 
+ 
+ plot_zCIs <- ggplot(all_season_df, aes(x=Season, y=zEstimate, fill=term)) + 
+  geom_bar(stat="identity", color="black", position=position_dodge()) +
+  geom_errorbar(aes(ymin=zLower, ymax=zUpper), width=.2,
+                 position=position_dodge(.9))
+ 
+ 
+ plot_cis_zoom <- plot_cis + plot_cis_confined + plot_layout(nrow = 2)
+
+```
+
+
+```{r code chunk 2}
+# your code here. This code chunk is not as necessary, it was to try and get rid of all the min values. I think I will just have to hard-code, trial and error where these points are...
+# min_soil10z <- min(Soil_moisture_wdate$z_10)
+# min_soil60z <- min(Soil_moisture_wdate$z_60)
+# print(min_soil60)
+# print(min_soil10)
+# print('min soil at depth 10 is: -1.708975 and the min soil at depth 60 is: -2.091763')
+# 
+# min_snowpackz<- min(snow_depth_wdate$z_snowdepth)
+# min_tempz <- min(snow_depth_wdate$z_airtemp)
+# 
+# rowswmin10 <- which(Soil_moisture_wdate$z_10 == min(Soil_moisture_wdate$z_10))
+# 
+# rowswmin60 <-
+# print(rowswmin10)'
+
+
+#-----------------Plot Differences of 10 data----------------------------#
+
+season1_plot_10d <- ggplot(season1SM, aes(Date, difference10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('differenced Soil Moisture: depth 10(Season 1)')
+season2_plot_10d <- ggplot(season2SM, aes(Date, difference10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('differenced Soil Moisture: depth 10(Season 2)')
+season3_plot_10d <- ggplot(season3SM, aes(Date, difference10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('differenced Soil Moisture: depth 10(Season 3)')
+season4_plot_10d <- ggplot(season4SM, aes(Date, difference10))+
+  geom_point()+
+  geom_smooth()+
+  theme_bw()+
+  labs(x="Date")+
+  ggtitle('differenced Soil Moisture: depth 10(Season 4)')
+
+seasonalPlotsof10dd <- season1_plot_10d + season2_plot_10d + season3_plot_10d + season4_plot_10d + plot_layout(nrow=2, ncol=2)
+seasonalPlotsof10dd
+```
+Your text here (<100 words).
+The covariates are snow pack depth, max temp, and season total precipitation. I think that the snow pack would be a valid place to start as snow pack can reduce the amount of water that gets down to the soil as the flow of water through snow pack differs and diffuses in comparison to liquid water on top of soil. The max temperature will directly affect the snow pack. Melting and refreezing of snow pack create a more dense layer that makes water harder to penetrate and run through. C matrix will be num states x num covariates (2x2).
+
+
+
+Question 3
+Is each observation suppposed to be modeled as a different state, or do you have 'replicate' observations, i.e. more than one observation being funneled into a state (via the Z matrix)? What are the dimensions of your Y's (observations x time steps) and X's (states x time steps)? Build the Z matrix you need, or specify it using a shortcut (e.g., Z = "identity"). [1 point]
+```{r code chunk 3}
+Z = 'identity'
+# your code here
+```
+Your text here (<100 words).
+States will be the different depths that the data is collected at. The Z matrix will be the identity matrix. this will be a 2x1383 matrix.
+
+Question 4
+Specify the rest of your MAR/MARSS parameters using a model list, like we have been doing so far: R (based on the number of observations), and U, B, C, Q (based on the number of states). 
+If you would like to fit MAR instead of MARSS, then set R to "zero".
+Remember what we learned over the past few weeks, e.g. if you want to focus on the B matrix (e.g. species interactions) then it is best to fix U (long-term trend) to zero, which you can do after demeaning the variate data. 
+If you are building custom matrices, remember that R and Q need to be symmetrical, B does not need to be. Also, R, Q, and B need to be square; all other matrices may be rectangular. If you have covariate data, assign it here as well to the model list ("c").
+If you plan on comparing models, it is best practice to start with a simple model structure (e.g., Q = "diagonal and equal" instead of "unconstrained"), and make it progressively more complex. 
+ [1 point]
+```{r code chunk 4}
+mod_mine = list() # This will be the list of parameters, each is a matrix
+B = matrix(c(.7, .65, .1, .7), nrow=2) 
+B
+mod_mine$Z = "identity"
+mod_mine$B = B  # iteratcion between the 10 and 60 but minimal between 60 and 10
+mod_mine$U = "zero" # no drift
+mod_mine$Q = "diagonal and equal" # single process error across species and replicates
+mod_mine$C = "diagonal and unequal"# each species may be affected by the covariate differently
+mod_mine$c = snow_ts_matrix_z # Covariate data, what we cooked earlier
+mod_mine$R = "zero" # Single observation error across species and replicates
+mod_mine$A = "zero"
+# your code here
+```
+Your text here (<100 words).
+
+The B Matrix:  2x2 where there is a relationship between the 10 and 60, but less of a relationship between the 60 and 10?? Self defined, check above.
+
+The U matrix: I don't think there is any trend so I will initially set this to 0
+
+The R matrix: initially try 0/identity 1389x1389
+
+The Q Matrix: initially set to diagonal and unequal, 2x2
+
+C Matrix: unconstrained
+
+Given that it is periodic, we will need to input this into our model. See lecture 9a/b??
+
+A = 0
+
+
+
+Question 5
+Fit the model. If you get errors or warnings, first check that the model specification is right (e.g., number of dimensions of each matrix). If dimensions are right, but the model does not converge, increase number of iterations using the agument 'maxit'. If it still does not converge, check if the model you are fitting does not make sense given the data (e.g. perhaps you are fitting a stationary model to a non-stationary process), and re-specify the model accordingly, in step 5.
+If you are fitting MARSS and one of the variances goes to zero (Q or R), try fitting a MAR model instead.
+If errors persist, check the MARSS User Guide: https://cran.r-project.org/web/packages/MARSS/vignettes/UserGuide.pdf ("Appendix A - Warnings and errors", page 309). 
+Once it does work: bootstrap the model(s). What do you obtain? Is it what you expected?
+What are the next steps to complete analyses for your final project? [1 point]
+```{r code chunk 5}
+mod_mine.fit = MARSS(soil_ts_matz, model=mod_mine)
+MARSSparamCIs(mod_mine.fit)
+# your code here
+```
+Your text here (<100 words).
+
+
+Question 6 [ONLY FOR THOSE OF YOU WHO ARE NOT USING MAR/MARSS]
+Discuss with Albert/Kyle and find an appropriate model to use. 
+Follow the steps 1-5 above by reading in your response and driver data (if any), transforming it (if necessary), and specifying a model (e.g, ARIMA, DFA, DLM) that gets at your question.
+Fit the model, if you can (if we have not seen this in class yet, let's troubleshoot together). 
+What did you learn? 
+What are the next steps to complete analyses for your final project? [5 points]
+```{r code chunk 6}
+# your code here
+```
+Your text here (<100 words).
+
+### Any notes (optional)
+If you need to add any additional text, please do so here (<100 words).
+
